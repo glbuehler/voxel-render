@@ -1,8 +1,8 @@
-use std::sync::Arc;
+use std::{num::NonZero, sync::Arc};
 
 use wgpu::{util::DeviceExt, TextureView};
 
-use crate::vertex::Vertex;
+use crate::{camera::Camera, vertex::Vertex};
 
 pub struct State<'a> {
     instance: wgpu::Instance,
@@ -14,7 +14,11 @@ pub struct State<'a> {
     pipeline: wgpu::RenderPipeline,
     window: Arc<winit::window::Window>,
 
+    uniform_bind_group: wgpu::BindGroup,
+
+    camera: Camera,
     vertex_buf: wgpu::Buffer,
+    proj_view_matrix_buf: wgpu::Buffer,
 }
 
 impl<'a> State<'a> {
@@ -41,12 +45,49 @@ impl<'a> State<'a> {
         let surface_config = surface.get_default_config(&adapter, 800, 600).unwrap();
         surface.configure(&device, &surface_config);
 
+        let proj_view_matrix_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("view matrix buffer"),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            size: std::mem::size_of::<cgmath::Matrix4<f32>>() as u64,
+            mapped_at_creation: false,
+        });
+
+        let uniform_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("view matrix uniform bind group layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                }],
+            });
+
+        let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("view matrix uniform"),
+            layout: &uniform_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: proj_view_matrix_buf.as_entire_binding(),
+            }],
+        });
+
         let shader_module = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Render Pipeline"),
             depth_stencil: None,
-            layout: Some(&device.create_pipeline_layout(&Default::default())),
+            layout: Some(
+                &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("pipeline layout descriptor"),
+                    bind_group_layouts: &[&uniform_bind_group_layout],
+                    ..Default::default()
+                }),
+            ),
             multiview: None,
             multisample: Default::default(),
             primitive: wgpu::PrimitiveState {
@@ -71,7 +112,7 @@ impl<'a> State<'a> {
             fragment: Some(wgpu::FragmentState {
                 targets: &[Some(wgpu::ColorTargetState {
                     format: surface_config.format,
-                    blend: None,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: Default::default(),
                 })],
                 compilation_options: Default::default(),
@@ -85,21 +126,23 @@ impl<'a> State<'a> {
             usage: wgpu::BufferUsages::VERTEX,
             contents: bytemuck::cast_slice(&[
                 Vertex {
-                    pos: [0.0, 0.5, 0.0],
+                    pos: [0.0, 0.5, -2.0],
                     col: [1.0, 0.0, 0.0],
                 },
                 Vertex {
-                    pos: [0.5, -0.5, 0.0],
+                    pos: [0.5, -0.5, -2.0],
                     col: [0.0, 0.0, 1.0],
                 },
                 Vertex {
-                    pos: [-0.5, -0.5, 0.0],
+                    pos: [-0.5, -0.5, -2.0],
                     col: [0.0, 1.0, 0.0],
                 },
             ]),
         });
 
         Self {
+            camera: Camera::new(surface_config.width as f32 / surface_config.height as f32),
+
             instance,
             surface,
             surface_config,
@@ -109,7 +152,10 @@ impl<'a> State<'a> {
             pipeline,
             window,
 
+            uniform_bind_group,
+
             vertex_buf,
+            proj_view_matrix_buf,
         }
     }
 
@@ -126,6 +172,8 @@ impl<'a> State<'a> {
         self.surface_config.width = new_size.width;
         self.surface_config.height = new_size.height;
         self.surface.configure(&self.device, &self.surface_config);
+
+        self.camera.aspect = new_size.width as f32 / new_size.height as f32;
     }
 
     pub fn width(&self) -> u32 {
@@ -137,6 +185,10 @@ impl<'a> State<'a> {
     }
 
     pub fn render(&self) -> Result<(), wgpu::SurfaceError> {
+        let mat: [[f32; 4]; 4] = self.camera.proj_view_matrix().into();
+        self.queue
+            .write_buffer(&self.proj_view_matrix_buf, 0, bytemuck::cast_slice(&mat));
+
         let out = self.surface.get_current_texture()?;
         let view = out.texture.create_view(&Default::default());
 
@@ -166,7 +218,9 @@ impl<'a> State<'a> {
                 timestamp_writes: None,
             });
             render_pass.set_pipeline(&self.pipeline);
+            render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
+
             render_pass.draw(0..3, 0..1);
         }
 

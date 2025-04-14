@@ -1,5 +1,6 @@
 #![allow(dead_code, unused)]
 
+mod camera;
 mod state;
 mod vertex;
 
@@ -43,9 +44,6 @@ impl ApplicationHandler for AppHandler<'_> {
         if window_id != state.window().id() {
             return;
         }
-        //if state.input(&event) {
-        //    return;
-        //}
 
         match event {
             WindowEvent::Resized(size) => state.resize(size),
