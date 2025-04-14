@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use wgpu::TextureView;
+use wgpu::{util::DeviceExt, TextureView};
+
+use crate::vertex::Vertex;
 
 pub struct State<'a> {
     instance: wgpu::Instance,
@@ -11,6 +13,8 @@ pub struct State<'a> {
     queue: wgpu::Queue,
     pipeline: wgpu::RenderPipeline,
     window: Arc<winit::window::Window>,
+
+    vertex_buf: wgpu::Buffer,
 }
 
 impl<'a> State<'a> {
@@ -35,7 +39,6 @@ impl<'a> State<'a> {
             .unwrap();
 
         let surface_config = surface.get_default_config(&adapter, 800, 600).unwrap();
-
         surface.configure(&device, &surface_config);
 
         let shader_module = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
@@ -43,7 +46,6 @@ impl<'a> State<'a> {
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Render Pipeline"),
             depth_stencil: None,
-            fragment: None,
             layout: Some(&device.create_pipeline_layout(&Default::default())),
             multiview: None,
             multisample: Default::default(),
@@ -57,11 +59,44 @@ impl<'a> State<'a> {
                 conservative: false,
             },
             vertex: wgpu::VertexState {
-                buffers: &[],
+                buffers: &[wgpu::VertexBufferLayout {
+                    step_mode: Default::default(),
+                    attributes: &Vertex::attributes(),
+                    array_stride: Vertex::stride(),
+                }],
                 compilation_options: Default::default(),
                 entry_point: "vx_main",
                 module: &shader_module,
             },
+            fragment: Some(wgpu::FragmentState {
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_config.format,
+                    blend: None,
+                    write_mask: Default::default(),
+                })],
+                compilation_options: Default::default(),
+                entry_point: "fg_main",
+                module: &shader_module,
+            }),
+        });
+
+        let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vertex buffer"),
+            usage: wgpu::BufferUsages::VERTEX,
+            contents: bytemuck::cast_slice(&[
+                Vertex {
+                    pos: [0.0, 0.5, 0.0],
+                    col: [1.0, 0.0, 0.0],
+                },
+                Vertex {
+                    pos: [0.5, -0.5, 0.0],
+                    col: [0.0, 0.0, 1.0],
+                },
+                Vertex {
+                    pos: [-0.5, -0.5, 0.0],
+                    col: [0.0, 1.0, 0.0],
+                },
+            ]),
         });
 
         Self {
@@ -73,6 +108,8 @@ impl<'a> State<'a> {
             queue,
             pipeline,
             window,
+
+            vertex_buf,
         }
     }
 
@@ -109,7 +146,7 @@ impl<'a> State<'a> {
                 label: Some("Main Encoder"),
             });
         {
-            let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Main Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     ops: wgpu::Operations {
@@ -128,6 +165,9 @@ impl<'a> State<'a> {
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
+            render_pass.set_pipeline(&self.pipeline);
+            render_pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
+            render_pass.draw(0..3, 0..1);
         }
 
         self.queue.submit([encoder.finish()]);

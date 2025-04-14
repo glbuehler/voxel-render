@@ -1,5 +1,7 @@
 #![allow(dead_code, unused)]
+
 mod state;
+mod vertex;
 
 use winit::{
     application::ApplicationHandler,
