@@ -30,11 +30,25 @@ impl ApplicationHandler for AppHandler<'_> {
         self.state = Some(pollster::block_on(state::State::new(window)));
     }
 
+    fn device_event(
+        &mut self,
+        event_loop: &winit::event_loop::ActiveEventLoop,
+        device_id: winit::event::DeviceId,
+        event: winit::event::DeviceEvent,
+    ) {
+        let state = self
+            .state
+            .as_mut()
+            .expect("Invalid state: window event on uninitialized window");
+
+        state.device_input(event);
+    }
+
     fn window_event(
         &mut self,
         event_loop: &winit::event_loop::ActiveEventLoop,
         window_id: winit::window::WindowId,
-        event: winit::event::WindowEvent,
+        event: WindowEvent,
     ) {
         let state = self
             .state
@@ -71,7 +85,7 @@ impl ApplicationHandler for AppHandler<'_> {
                     Err(e) => eprintln!("{:?}", e),
                 }
             }
-            _ => (),
+            _ => state.window_input(event),
         };
     }
 

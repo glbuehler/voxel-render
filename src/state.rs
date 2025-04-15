@@ -42,7 +42,8 @@ impl<'a> State<'a> {
             .await
             .unwrap();
 
-        let surface_config = surface.get_default_config(&adapter, 800, 600).unwrap();
+        let mut surface_config = surface.get_default_config(&adapter, 800, 600).unwrap();
+        surface_config.present_mode = wgpu::PresentMode::Fifo;
         surface.configure(&device, &surface_config);
 
         let proj_view_matrix_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -94,7 +95,7 @@ impl<'a> State<'a> {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Cw,
-                cull_mode: None,
+                cull_mode: Some(wgpu::Face::Back),
                 unclipped_depth: false,
                 polygon_mode: wgpu::PolygonMode::Fill,
                 conservative: false,
@@ -163,6 +164,68 @@ impl<'a> State<'a> {
         &self.window
     }
 
+    pub fn device_input(&mut self, event: winit::event::DeviceEvent) {
+        use winit::event::DeviceEvent;
+        match event {
+            DeviceEvent::MouseWheel {
+                delta: winit::event::MouseScrollDelta::LineDelta(_, d),
+            } => {
+                self.camera.fovy = cgmath::Rad((self.camera.fovy.0 + 0.001 * d).clamp(0.01, 3.14));
+            }
+            DeviceEvent::MouseMotion { delta: (dx, dy) } => {
+                self.camera.pitch += cgmath::Rad(-dy as f32 / 256.0);
+                self.camera.yaw += cgmath::Rad(dx as f32 / 256.0);
+            }
+            _ => (),
+        }
+    }
+
+    pub fn window_input(&mut self, event: winit::event::WindowEvent) {
+        use cgmath::*;
+        use winit::{
+            event::{KeyEvent, WindowEvent},
+            keyboard::{KeyCode, PhysicalKey},
+        };
+        match event {
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        state: winit::event::ElementState::Pressed,
+                        physical_key,
+                        ..
+                    },
+                ..
+            } => match physical_key {
+                PhysicalKey::Code(KeyCode::KeyW) => {
+                    let f = self.camera.forward();
+                    self.camera.position += f * 0.1;
+                }
+                PhysicalKey::Code(KeyCode::KeyA) => {
+                    let f = self.camera.forward();
+                    let left = Vector3::unit_y().cross(f);
+                    self.camera.position += left * 0.1;
+                }
+                PhysicalKey::Code(KeyCode::KeyS) => {
+                    let f = self.camera.forward();
+                    self.camera.position -= f * 0.1;
+                }
+                PhysicalKey::Code(KeyCode::KeyD) => {
+                    let f = self.camera.forward();
+                    let right = -1.0 * Vector3::unit_y().cross(f);
+                    self.camera.position += right * 0.1;
+                }
+                PhysicalKey::Code(KeyCode::Space) => {
+                    self.camera.position += Vector3::unit_y() * 0.1;
+                }
+                PhysicalKey::Code(KeyCode::ShiftLeft) => {
+                    self.camera.position += Vector3::unit_y() * -0.1;
+                }
+                _ => (),
+            },
+            _ => (),
+        }
+    }
+
     pub fn update(&mut self) {}
 
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -204,11 +267,11 @@ impl<'a> State<'a> {
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
                             r: 0.5,
-                            g: 1.0,
-                            b: 1.0,
+                            g: 0.5,
+                            b: 0.5,
                             a: 1.0,
                         }),
-                        store: wgpu::StoreOp::Store,
+                        store: wgpu::StoreOp::Discard,
                     },
                     resolve_target: None,
                     view: &view,
