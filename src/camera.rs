@@ -42,7 +42,7 @@ impl Camera {
     pub fn direction(&self) -> Vector3<f32> {
         let (sin_pitch, cos_pitch) = self.pitch.0.sin_cos();
         let (sin_yaw, cos_yaw) = self.yaw.0.sin_cos();
-        Vector3::new(cos_pitch * sin_yaw, sin_pitch, -cos_pitch * cos_yaw).normalize()
+        Vector3::new(cos_pitch * sin_yaw, -sin_pitch, -cos_pitch * cos_yaw).normalize()
     }
 
     pub fn forward(&self) -> Vector3<f32> {
@@ -110,7 +110,7 @@ impl CameraController {
 
     pub fn process_mouse(&mut self, dx: f32, dy: f32) {
         self.mouse_dx += dx;
-        self.mouse_dy -= dy;
+        self.mouse_dy += dy;
     }
 
     pub fn process_scroll(&mut self, delta_y: f32) {

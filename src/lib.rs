@@ -1,5 +1,6 @@
 #![allow(dead_code, unused)]
 
+mod background;
 mod camera;
 mod state;
 mod vertex;

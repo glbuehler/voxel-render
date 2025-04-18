@@ -3,6 +3,7 @@ use std::{num::NonZero, sync::Arc, time};
 use wgpu::{util::DeviceExt, TextureView};
 
 use crate::{
+    background,
     camera::{Camera, CameraController},
     vertex::Vertex,
 };
@@ -15,16 +16,21 @@ pub struct State<'a> {
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::RenderPipeline,
+    background_pipeline: wgpu::RenderPipeline,
     window: Arc<winit::window::Window>,
 
     uniform_bind_group: wgpu::BindGroup,
+    background_bind_group: wgpu::BindGroup,
 
     camera: Camera,
     camera_controller: CameraController,
     vertex_buf: wgpu::Buffer,
+    background_vertices: wgpu::Buffer,
     proj_view_matrix_buf: wgpu::Buffer,
+    background_buf: wgpu::Buffer,
 
     last_render: time::Instant,
+    start_instant: time::Instant,
 }
 
 impl<'a> State<'a> {
@@ -88,6 +94,8 @@ impl<'a> State<'a> {
             }],
         });
 
+        let background_shader_module =
+            device.create_shader_module(wgpu::include_wgsl!("background.wgsl"));
         let shader_module = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -133,6 +141,52 @@ impl<'a> State<'a> {
             }),
         });
 
+        let (background_buf, background_bind_group_layout, background_bind_group) =
+            background::background(&device);
+
+        let background_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Background Render Pipeline"),
+            depth_stencil: None,
+            layout: Some(
+                &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("pipeline layout descriptor"),
+                    bind_group_layouts: &[&background_bind_group_layout],
+                    ..Default::default()
+                }),
+            ),
+            multiview: None,
+            multisample: Default::default(),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Cw,
+                cull_mode: Some(wgpu::Face::Back),
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            vertex: wgpu::VertexState {
+                buffers: &[wgpu::VertexBufferLayout {
+                    step_mode: Default::default(),
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x3],
+                    array_stride: std::mem::size_of::<[f32; 3]>() as u64,
+                }],
+                compilation_options: Default::default(),
+                entry_point: "vx_main",
+                module: &background_shader_module,
+            },
+            fragment: Some(wgpu::FragmentState {
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: Default::default(),
+                })],
+                compilation_options: Default::default(),
+                entry_point: "fg_main",
+                module: &background_shader_module,
+            }),
+        });
+
         let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("vertex buffer"),
             usage: wgpu::BufferUsages::VERTEX,
@@ -152,6 +206,19 @@ impl<'a> State<'a> {
             ]),
         });
 
+        let background_vertices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("background vertices"),
+            usage: wgpu::BufferUsages::VERTEX,
+            contents: bytemuck::cast_slice(&[
+                [-1.0f32, -1.0, 0.0],
+                [-1.0, 1.0, 0.0],
+                [1.0, -1.0, 0.0],
+                [-1.0, 1.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [1.0, -1.0, 0.0],
+            ]),
+        });
+
         Self {
             camera: Camera::new(Self::INIT_WIDTH as f32 / Self::INIT_HEIGHT as f32),
             camera_controller: CameraController::new(6.0, 0.002),
@@ -163,14 +230,19 @@ impl<'a> State<'a> {
             device,
             queue,
             pipeline,
+            background_pipeline,
             window,
 
             uniform_bind_group,
+            background_bind_group,
 
             vertex_buf,
+            background_vertices,
             proj_view_matrix_buf,
+            background_buf,
 
             last_render: time::Instant::now(),
+            start_instant: time::Instant::now(),
         }
     }
 
@@ -225,6 +297,19 @@ impl<'a> State<'a> {
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let now = time::Instant::now();
+
+        self.queue.write_buffer(
+            &self.background_buf,
+            0,
+            bytemuck::bytes_of(&background::BackgroundUniform {
+                resolution: [self.width(), self.height()],
+                millis_elapsed: (now - self.start_instant).as_millis() as u32,
+                pitch: self.camera.pitch.0,
+                yaw: self.camera.yaw.0,
+                _padding: 0,
+            }),
+        );
+
         let elapsed = now - self.last_render;
         println!("time since last frame: {:?}", elapsed);
         self.camera_controller
@@ -263,10 +348,14 @@ impl<'a> State<'a> {
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
+            render_pass.set_pipeline(&self.background_pipeline);
+            render_pass.set_bind_group(0, &self.background_bind_group, &[]);
+            render_pass.set_vertex_buffer(0, self.background_vertices.slice(..));
+            render_pass.draw(0..6, 0..1);
+
             render_pass.set_pipeline(&self.pipeline);
             render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
-
             render_pass.draw(0..3, 0..1);
         }
 
