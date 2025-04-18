@@ -68,24 +68,55 @@ impl Camera {
 }
 
 pub struct CameraController {
-    speed: f32,
+    pub speed: f32,
+    pub sensitivity: f32,
+    pub min_fovy: Rad<f32>,
+    pub max_fovy: Rad<f32>,
+    pub constrain_pitch: bool,
 
     forward: bool,
     backward: bool,
     left: bool,
     right: bool,
+    up: bool,
+    down: bool,
+
+    scroll: f32,
+    mouse_dx: f32,
+    mouse_dy: f32,
 }
 
 impl CameraController {
-    pub fn new(speed: f32) -> Self {
+    pub fn new(speed: f32, sensitivity: f32) -> Self {
         Self {
             speed,
+            sensitivity,
+            min_fovy: Rad(0.01),
+            max_fovy: Rad(3.14),
+            constrain_pitch: true,
+
             forward: false,
             backward: false,
             left: false,
             right: false,
+            up: false,
+            down: false,
+
+            scroll: 0.0,
+            mouse_dx: 0.0,
+            mouse_dy: 0.0,
         }
     }
+
+    pub fn process_mouse(&mut self, dx: f32, dy: f32) {
+        self.mouse_dx += dx;
+        self.mouse_dy -= dy;
+    }
+
+    pub fn process_scroll(&mut self, delta_y: f32) {
+        self.scroll += delta_y;
+    }
+
     pub fn process_keyboard(&mut self, key: winit::keyboard::KeyCode, pressed: bool) {
         use winit::keyboard::KeyCode;
 
@@ -94,15 +125,18 @@ impl CameraController {
             KeyCode::KeyA => self.left = pressed,
             KeyCode::KeyS => self.backward = pressed,
             KeyCode::KeyD => self.right = pressed,
+            KeyCode::Space => self.up = pressed,
+            KeyCode::ShiftLeft => self.down = pressed,
             _ => (),
         }
     }
 
-    pub fn update_camera(&self, cam: &mut Camera, dt: time::Duration) {
+    pub fn update_camera(&mut self, cam: &mut Camera, dt: time::Duration) {
         let dt = dt.as_secs_f32();
 
         let fw = cam.forward();
         let right = cam.right();
+        let up = Vector3::<f32>::unit_y();
         cam.position += (if self.forward { 1.0 } else { 0.0 }
             - if self.backward { 1.0 } else { 0.0 })
             * fw
@@ -112,7 +146,22 @@ impl CameraController {
             * right
             * dt
             * self.speed;
-    }
+        cam.position += (if self.up { 1.0 } else { 0.0 } - if self.down { 1.0 } else { 0.0 })
+            * up
+            * dt
+            * self.speed;
 
-    pub fn reset(&mut self) {}
+        assert!(self.min_fovy.0 > 0.0);
+        assert!(self.max_fovy.0 < std::f32::consts::PI);
+        cam.fovy = Rad((cam.fovy.0 + self.scroll * 0.001).clamp(self.min_fovy.0, self.max_fovy.0));
+        self.scroll = 0.0;
+
+        cam.yaw += Rad(self.mouse_dx * self.sensitivity);
+        cam.pitch += Rad(self.mouse_dy * self.sensitivity);
+        const HALF_PI: f32 = std::f32::consts::FRAC_PI_2.next_down();
+        if self.constrain_pitch {
+            cam.pitch.0 = cam.pitch.0.clamp(-HALF_PI, HALF_PI);
+        }
+        (self.mouse_dx, self.mouse_dy) = (0.0, 0.0);
+    }
 }

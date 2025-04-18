@@ -32,6 +32,8 @@ impl<'a> State<'a> {
     const INIT_HEIGHT: u32 = 600;
 
     pub async fn new(window: winit::window::Window) -> Self {
+        window.set_cursor_grab(winit::window::CursorGrabMode::Confined);
+        window.set_cursor_visible(false);
         let window = Arc::new(window);
 
         let instance = wgpu::Instance::default();
@@ -154,7 +156,7 @@ impl<'a> State<'a> {
 
         Self {
             camera: Camera::new(Self::INIT_WIDTH as f32 / Self::INIT_HEIGHT as f32),
-            camera_controller: CameraController::new(10.0),
+            camera_controller: CameraController::new(6.0, 0.002),
 
             instance,
             surface,
@@ -191,11 +193,10 @@ impl<'a> State<'a> {
             DeviceEvent::MouseWheel {
                 delta: winit::event::MouseScrollDelta::LineDelta(_, d),
             } => {
-                self.camera.fovy = cgmath::Rad((self.camera.fovy.0 + 0.001 * d).clamp(0.01, 3.14));
+                self.camera_controller.process_scroll(d);
             }
             DeviceEvent::MouseMotion { delta: (dx, dy) } => {
-                self.camera.pitch += cgmath::Rad(-dy as f32 / 256.0);
-                self.camera.yaw += cgmath::Rad(dx as f32 / 256.0);
+                self.camera_controller.process_mouse(dx as f32, dy as f32)
             }
             _ => (),
         }
