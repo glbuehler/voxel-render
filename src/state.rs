@@ -227,8 +227,10 @@ impl<'a> State<'a> {
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let now = time::Instant::now();
+        let elapsed = now - self.last_render;
+        println!("time since last frame: {:?}", elapsed);
         self.camera_controller
-            .update_camera(&mut self.camera, now - self.last_render);
+            .update_camera(&mut self.camera, elapsed);
         self.last_render = now;
 
         let mat: [[f32; 4]; 4] = self.camera.proj_view_matrix().into();
