@@ -27,6 +27,8 @@ impl ApplicationHandler for AppHandler<'_> {
         let window = event_loop
             .create_window(attributes)
             .expect("Failed to create window");
+        window.set_cursor_visible(false);
+        window.set_cursor_grab(winit::window::CursorGrabMode::Confined);
         self.state = Some(pollster::block_on(state::State::new(window)));
     }
 
@@ -60,6 +62,16 @@ impl ApplicationHandler for AppHandler<'_> {
         }
 
         match event {
+            WindowEvent::Focused(focused) => {
+                let window = state.window();
+                if focused {
+                    window.set_cursor_visible(false);
+                    window.set_cursor_grab(winit::window::CursorGrabMode::Confined);
+                } else {
+                    window.set_cursor_visible(true);
+                    window.set_cursor_grab(winit::window::CursorGrabMode::None);
+                }
+            }
             WindowEvent::Resized(size) => state.resize(size),
             WindowEvent::CloseRequested
             | WindowEvent::KeyboardInput {

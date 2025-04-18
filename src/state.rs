@@ -32,8 +32,6 @@ impl<'a> State<'a> {
     const INIT_HEIGHT: u32 = 600;
 
     pub async fn new(window: winit::window::Window) -> Self {
-        window.set_cursor_grab(winit::window::CursorGrabMode::Confined);
-        window.set_cursor_visible(false);
         let window = Arc::new(window);
 
         let instance = wgpu::Instance::default();
