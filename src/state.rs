@@ -1,8 +1,11 @@
-use std::{num::NonZero, sync::Arc};
+use std::{num::NonZero, sync::Arc, time};
 
 use wgpu::{util::DeviceExt, TextureView};
 
-use crate::{camera::Camera, vertex::Vertex};
+use crate::{
+    camera::{Camera, CameraController},
+    vertex::Vertex,
+};
 
 pub struct State<'a> {
     instance: wgpu::Instance,
@@ -17,11 +20,17 @@ pub struct State<'a> {
     uniform_bind_group: wgpu::BindGroup,
 
     camera: Camera,
+    camera_controller: CameraController,
     vertex_buf: wgpu::Buffer,
     proj_view_matrix_buf: wgpu::Buffer,
+
+    last_render: time::Instant,
 }
 
 impl<'a> State<'a> {
+    const INIT_WIDTH: u32 = 800;
+    const INIT_HEIGHT: u32 = 600;
+
     pub async fn new(window: winit::window::Window) -> Self {
         let window = Arc::new(window);
 
@@ -42,7 +51,9 @@ impl<'a> State<'a> {
             .await
             .unwrap();
 
-        let mut surface_config = surface.get_default_config(&adapter, 800, 600).unwrap();
+        let mut surface_config = surface
+            .get_default_config(&adapter, Self::INIT_WIDTH, Self::INIT_HEIGHT)
+            .unwrap();
         surface_config.present_mode = wgpu::PresentMode::Fifo;
         surface.configure(&device, &surface_config);
 
@@ -142,7 +153,8 @@ impl<'a> State<'a> {
         });
 
         Self {
-            camera: Camera::new(surface_config.width as f32 / surface_config.height as f32),
+            camera: Camera::new(Self::INIT_WIDTH as f32 / Self::INIT_HEIGHT as f32),
+            camera_controller: CameraController::new(10.0),
 
             instance,
             surface,
@@ -157,6 +169,8 @@ impl<'a> State<'a> {
 
             vertex_buf,
             proj_view_matrix_buf,
+
+            last_render: time::Instant::now(),
         }
     }
 
@@ -167,6 +181,13 @@ impl<'a> State<'a> {
     pub fn device_input(&mut self, event: winit::event::DeviceEvent) {
         use winit::event::DeviceEvent;
         match event {
+            DeviceEvent::Key(winit::event::RawKeyEvent {
+                physical_key: winit::keyboard::PhysicalKey::Code(code),
+                state,
+            }) => {
+                self.camera_controller
+                    .process_keyboard(code, state == winit::event::ElementState::Pressed);
+            }
             DeviceEvent::MouseWheel {
                 delta: winit::event::MouseScrollDelta::LineDelta(_, d),
             } => {
@@ -180,51 +201,7 @@ impl<'a> State<'a> {
         }
     }
 
-    pub fn window_input(&mut self, event: winit::event::WindowEvent) {
-        use cgmath::*;
-        use winit::{
-            event::{KeyEvent, WindowEvent},
-            keyboard::{KeyCode, PhysicalKey},
-        };
-        match event {
-            WindowEvent::KeyboardInput {
-                event:
-                    KeyEvent {
-                        state: winit::event::ElementState::Pressed,
-                        physical_key,
-                        ..
-                    },
-                ..
-            } => match physical_key {
-                PhysicalKey::Code(KeyCode::KeyW) => {
-                    let f = self.camera.forward();
-                    self.camera.position += f * 0.1;
-                }
-                PhysicalKey::Code(KeyCode::KeyA) => {
-                    let f = self.camera.forward();
-                    let left = Vector3::unit_y().cross(f);
-                    self.camera.position += left * 0.1;
-                }
-                PhysicalKey::Code(KeyCode::KeyS) => {
-                    let f = self.camera.forward();
-                    self.camera.position -= f * 0.1;
-                }
-                PhysicalKey::Code(KeyCode::KeyD) => {
-                    let f = self.camera.forward();
-                    let right = -1.0 * Vector3::unit_y().cross(f);
-                    self.camera.position += right * 0.1;
-                }
-                PhysicalKey::Code(KeyCode::Space) => {
-                    self.camera.position += Vector3::unit_y() * 0.1;
-                }
-                PhysicalKey::Code(KeyCode::ShiftLeft) => {
-                    self.camera.position += Vector3::unit_y() * -0.1;
-                }
-                _ => (),
-            },
-            _ => (),
-        }
-    }
+    pub fn window_input(&mut self, event: winit::event::WindowEvent) {}
 
     pub fn update(&mut self) {}
 
@@ -236,7 +213,7 @@ impl<'a> State<'a> {
         self.surface_config.height = new_size.height;
         self.surface.configure(&self.device, &self.surface_config);
 
-        self.camera.aspect = new_size.width as f32 / new_size.height as f32;
+        self.camera.resize(new_size.width, new_size.height);
     }
 
     pub fn width(&self) -> u32 {
@@ -247,7 +224,12 @@ impl<'a> State<'a> {
         self.surface_config.height
     }
 
-    pub fn render(&self) -> Result<(), wgpu::SurfaceError> {
+    pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+        let now = time::Instant::now();
+        self.camera_controller
+            .update_camera(&mut self.camera, now - self.last_render);
+        self.last_render = now;
+
         let mat: [[f32; 4]; 4] = self.camera.proj_view_matrix().into();
         self.queue
             .write_buffer(&self.proj_view_matrix_buf, 0, bytemuck::cast_slice(&mat));
@@ -267,7 +249,7 @@ impl<'a> State<'a> {
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
                             r: 0.5,
-                            g: 0.5,
+                            g: 0.0,
                             b: 0.5,
                             a: 1.0,
                         }),
