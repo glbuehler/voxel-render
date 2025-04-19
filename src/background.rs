@@ -7,7 +7,7 @@ pub struct BackgroundUniform {
     pub millis_elapsed: u32,
     pub pitch: f32,
     pub yaw: f32,
-    pub _padding: u32,
+    pub fovy: f32,
 }
 
 pub fn background(device: &wgpu::Device) -> (wgpu::Buffer, wgpu::BindGroupLayout, wgpu::BindGroup) {

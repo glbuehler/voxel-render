@@ -306,7 +306,7 @@ impl<'a> State<'a> {
                 millis_elapsed: (now - self.start_instant).as_millis() as u32,
                 pitch: self.camera.pitch.0,
                 yaw: self.camera.yaw.0,
-                _padding: 0,
+                fovy: self.camera.fovy.0,
             }),
         );
 

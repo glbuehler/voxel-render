@@ -4,6 +4,7 @@ struct BackgroundUniform {
     millis_elapsed: u32,
     pitch: f32,
     yaw: f32,
+    fovy: f32,
 };
 
 @group(0) @binding(0)
@@ -51,8 +52,13 @@ fn fg_main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let time = f32(uniform.millis_elapsed) * 0.0005;
     let uv = (frag_coord.xy / vec2<f32>(uniform.resolution)) * 2.0 - 1.0;
     let aspect = f32(uniform.resolution.x) / f32(uniform.resolution.y);
+    let fov_adjust = tan(uniform.fovy / 2.0);
 
-    var dir = normalize(vec3<f32>(uv.x * aspect, -uv.y, 1.0));
+    var dir = normalize(vec3<f32>(
+        uv.x * aspect * fov_adjust,
+        -uv.y * fov_adjust,
+        1.0
+    ));
 
     dir = rotate_x(dir, uniform.pitch);
     dir = rotate_y(dir, uniform.yaw);
