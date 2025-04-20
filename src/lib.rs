@@ -2,6 +2,7 @@
 
 mod background;
 mod camera;
+mod lattice;
 mod state;
 mod vertex;
 

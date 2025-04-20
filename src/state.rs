@@ -5,6 +5,7 @@ use wgpu::{util::DeviceExt, TextureView};
 use crate::{
     background,
     camera::{Camera, CameraController},
+    lattice,
     vertex::Vertex,
 };
 
@@ -25,6 +26,8 @@ pub struct State<'a> {
     camera: Camera,
     camera_controller: CameraController,
     vertex_buf: wgpu::Buffer,
+    index_buf: wgpu::Buffer,
+    depth_texture: wgpu::Texture,
     background_vertices: wgpu::Buffer,
     proj_view_matrix_buf: wgpu::Buffer,
     background_buf: wgpu::Buffer,
@@ -100,7 +103,13 @@ impl<'a> State<'a> {
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Render Pipeline"),
-            depth_stencil: None,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_compare: wgpu::CompareFunction::Less,
+                depth_write_enabled: true,
+                bias: Default::default(),
+                stencil: Default::default(),
+            }),
             layout: Some(
                 &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("pipeline layout descriptor"),
@@ -187,23 +196,33 @@ impl<'a> State<'a> {
             }),
         });
 
+        let lattice = lattice::Lattice::new();
+
         let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("vertex buffer"),
             usage: wgpu::BufferUsages::VERTEX,
-            contents: bytemuck::cast_slice(&[
-                Vertex {
-                    pos: [0.0, 0.5, -2.0],
-                    col: [1.0, 0.0, 0.0],
-                },
-                Vertex {
-                    pos: [0.5, -0.5, -2.0],
-                    col: [0.0, 0.0, 1.0],
-                },
-                Vertex {
-                    pos: [-0.5, -0.5, -2.0],
-                    col: [0.0, 1.0, 0.0],
-                },
-            ]),
+            contents: bytemuck::cast_slice(&lattice.vertices),
+        });
+
+        let index_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("index buffer"),
+            usage: wgpu::BufferUsages::INDEX,
+            contents: bytemuck::cast_slice(&lattice.indices),
+        });
+
+        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("depth texture"),
+            size: wgpu::Extent3d {
+                width: surface_config.width,
+                height: surface_config.height,
+                depth_or_array_layers: 1,
+            },
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            dimension: wgpu::TextureDimension::D2,
+            sample_count: 1,
+            mip_level_count: 1,
+            view_formats: &[],
         });
 
         let background_vertices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -237,6 +256,8 @@ impl<'a> State<'a> {
             background_bind_group,
 
             vertex_buf,
+            index_buf,
+            depth_texture,
             background_vertices,
             proj_view_matrix_buf,
             background_buf,
@@ -285,6 +306,20 @@ impl<'a> State<'a> {
         self.surface.configure(&self.device, &self.surface_config);
 
         self.camera.resize(new_size.width, new_size.height);
+        self.depth_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("depth texture"),
+            size: wgpu::Extent3d {
+                width: self.width(),
+                height: self.height(),
+                depth_or_array_layers: 1,
+            },
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            dimension: wgpu::TextureDimension::D2,
+            sample_count: 1,
+            mip_level_count: 1,
+            view_formats: &[],
+        });
     }
 
     pub fn width(&self) -> u32 {
@@ -322,6 +357,7 @@ impl<'a> State<'a> {
 
         let out = self.surface.get_current_texture()?;
         let view = out.texture.create_view(&Default::default());
+        let depth_view = self.depth_texture.create_view(&Default::default());
 
         let mut encoder = self
             .device
@@ -330,7 +366,7 @@ impl<'a> State<'a> {
             });
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Main Render Pass"),
+                label: Some("background render pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -339,7 +375,7 @@ impl<'a> State<'a> {
                             b: 0.5,
                             a: 1.0,
                         }),
-                        store: wgpu::StoreOp::Discard,
+                        store: wgpu::StoreOp::Store,
                     },
                     resolve_target: None,
                     view: &view,
@@ -352,11 +388,35 @@ impl<'a> State<'a> {
             render_pass.set_bind_group(0, &self.background_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.background_vertices.slice(..));
             render_pass.draw(0..6, 0..1);
-
+        }
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Main Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Discard,
+                    },
+                    resolve_target: None,
+                    view: &view,
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
             render_pass.set_pipeline(&self.pipeline);
             render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
-            render_pass.draw(0..3, 0..1);
+            render_pass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint16);
+
+            render_pass.draw_indexed(0..lattice::NUM_INDICES as u32, 0, 0..1);
         }
 
         self.queue.submit([encoder.finish()]);
