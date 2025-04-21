@@ -1,9 +1,12 @@
-use bytemuck::{Pod, Zeroable};
+pub const AXIS_X: u32 = 0;
+pub const AXIS_Y: u32 = 1;
+pub const AXIS_Z: u32 = 2;
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
     pub pos: [f32; 3],
+    pub axis: u32,
 }
 
 impl Vertex {
@@ -14,7 +17,7 @@ impl Vertex {
     pub fn attributes() -> [wgpu::VertexAttribute; 2] {
         wgpu::vertex_attr_array![
             0 => Float32x3,
-            1 => Float32x3,
+            1 => Uint32,
         ]
     }
 }

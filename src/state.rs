@@ -5,6 +5,8 @@ use wgpu::{util::DeviceExt, TextureView};
 use crate::{
     background,
     camera::{Camera, CameraController},
+    chunk,
+    globals::{self, GlobalsUniform},
     lattice,
     vertex::Vertex,
 };
@@ -29,7 +31,8 @@ pub struct State<'a> {
     index_buf: wgpu::Buffer,
     depth_texture: wgpu::Texture,
     background_vertices: wgpu::Buffer,
-    proj_view_matrix_buf: wgpu::Buffer,
+    globals_buf: wgpu::Buffer,
+    chunk_buf: wgpu::Buffer,
     background_buf: wgpu::Buffer,
 
     last_render: time::Instant,
@@ -66,35 +69,61 @@ impl<'a> State<'a> {
         surface_config.present_mode = wgpu::PresentMode::Fifo;
         surface.configure(&device, &surface_config);
 
-        let proj_view_matrix_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        let globals_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("view matrix buffer"),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            size: std::mem::size_of::<cgmath::Matrix4<f32>>() as u64,
+            size: std::mem::size_of::<globals::GlobalsUniform>() as u64,
             mapped_at_creation: false,
+        });
+
+        let mut chunk = chunk::Chunk::empty();
+        chunk.blocks[0][0] = 1;
+        let chunk_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("chunk buffer"),
+            usage: wgpu::BufferUsages::UNIFORM,
+            contents: bytemuck::cast_slice(&[chunk]),
         });
 
         let uniform_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("view matrix uniform bind group layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     },
-                    count: None,
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                }],
+                    wgpu::BindGroupLayoutEntry {
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                    },
+                ],
             });
 
         let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("view matrix uniform"),
             layout: &uniform_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: proj_view_matrix_buf.as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: globals_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: chunk_buf.as_entire_binding(),
+                },
+            ],
         });
 
         let background_shader_module =
@@ -123,7 +152,7 @@ impl<'a> State<'a> {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Cw,
-                cull_mode: Some(wgpu::Face::Back),
+                cull_mode: None,
                 unclipped_depth: false,
                 polygon_mode: wgpu::PolygonMode::Fill,
                 conservative: false,
@@ -259,7 +288,8 @@ impl<'a> State<'a> {
             index_buf,
             depth_texture,
             background_vertices,
-            proj_view_matrix_buf,
+            globals_buf,
+            chunk_buf,
             background_buf,
 
             last_render: time::Instant::now(),
@@ -352,8 +382,14 @@ impl<'a> State<'a> {
         self.last_render = now;
 
         let mat: [[f32; 4]; 4] = self.camera.proj_view_matrix().into();
+        let dir = self.camera.direction();
+        let globals = GlobalsUniform {
+            proj_view_mat: mat,
+            cam_dir: [dir.x, dir.y, dir.z],
+            _padding: 0,
+        };
         self.queue
-            .write_buffer(&self.proj_view_matrix_buf, 0, bytemuck::cast_slice(&mat));
+            .write_buffer(&self.globals_buf, 0, bytemuck::cast_slice(&[globals]));
 
         let out = self.surface.get_current_texture()?;
         let view = out.texture.create_view(&Default::default());

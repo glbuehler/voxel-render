@@ -2,6 +2,8 @@
 
 mod background;
 mod camera;
+mod chunk;
+mod globals;
 mod lattice;
 mod state;
 mod vertex;
