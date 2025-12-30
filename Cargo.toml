@@ -12,4 +12,4 @@ log = "0.4"
 noise = "0.9.0"
 pollster = "0.3"
 wgpu = "0.20.1"
-winit = { version = "0.30.3", features = ["rwh_05"] }
+winit = { version = "0.30.12", features = ["rwh_05"] }

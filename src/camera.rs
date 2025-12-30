@@ -67,6 +67,7 @@ impl Camera {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct CameraController {
     pub speed: f32,
     pub sensitivity: f32,

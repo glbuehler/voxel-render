@@ -303,19 +303,8 @@ impl<'a> State<'a> {
 
     pub fn device_input(&mut self, event: winit::event::DeviceEvent) {
         use winit::event::DeviceEvent;
+        dbg!(&event);
         match event {
-            DeviceEvent::Key(winit::event::RawKeyEvent {
-                physical_key: winit::keyboard::PhysicalKey::Code(code),
-                state,
-            }) => {
-                self.camera_controller
-                    .process_keyboard(code, state == winit::event::ElementState::Pressed);
-            }
-            DeviceEvent::MouseWheel {
-                delta: winit::event::MouseScrollDelta::LineDelta(_, d),
-            } => {
-                self.camera_controller.process_scroll(d);
-            }
             DeviceEvent::MouseMotion { delta: (dx, dy) } => {
                 self.camera_controller.process_mouse(dx as f32, dy as f32)
             }
@@ -323,7 +312,29 @@ impl<'a> State<'a> {
         }
     }
 
-    pub fn window_input(&mut self, event: winit::event::WindowEvent) {}
+    pub fn window_input(&mut self, event: winit::event::WindowEvent) {
+        use winit::event::WindowEvent;
+        match event {
+            WindowEvent::KeyboardInput {
+                event: winit::event::KeyEvent {
+                    physical_key: winit::keyboard::PhysicalKey::Code(code),
+                    state,
+                    ..
+                },
+                ..
+            } => {
+                self.camera_controller
+                    .process_keyboard(code, state == winit::event::ElementState::Pressed);
+            }
+            WindowEvent::MouseWheel {
+                delta: winit::event::MouseScrollDelta::LineDelta(_, d),
+                ..
+            } => {
+                self.camera_controller.process_scroll(d);
+            }
+            _ => (),
+        }
+    }
 
     pub fn update(&mut self) {}
 
