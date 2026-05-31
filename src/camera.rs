@@ -45,6 +45,10 @@ impl Camera {
         Vector3::new(cos_pitch * sin_yaw, -sin_pitch, -cos_pitch * cos_yaw).normalize()
     }
 
+    pub fn position(&self) -> Vector3<f32> {
+        self.position.to_vec()
+    }
+
     pub fn forward(&self) -> Vector3<f32> {
         let (sin_yaw, cos_yaw) = self.yaw.0.sin_cos();
         Vector3::new(sin_yaw, 0.0, -cos_yaw).normalize()
@@ -81,6 +85,7 @@ pub struct CameraController {
     right: bool,
     up: bool,
     down: bool,
+    fast: bool,
 
     scroll: f32,
     mouse_dx: f32,
@@ -102,6 +107,7 @@ impl CameraController {
             right: false,
             up: false,
             down: false,
+            fast: false,
 
             scroll: 0.0,
             mouse_dx: 0.0,
@@ -128,12 +134,14 @@ impl CameraController {
             KeyCode::KeyD => self.right = pressed,
             KeyCode::Space => self.up = pressed,
             KeyCode::ShiftLeft => self.down = pressed,
+            KeyCode::ControlLeft => self.fast = pressed,
             _ => (),
         }
     }
 
     pub fn update_camera(&mut self, cam: &mut Camera, dt: time::Duration) {
         let dt = dt.as_secs_f32();
+        let speed = self.speed * if self.fast { 3.0 } else { 1.0 };
 
         let fw = cam.forward();
         let right = cam.right();
@@ -142,15 +150,15 @@ impl CameraController {
             - if self.backward { 1.0 } else { 0.0 })
             * fw
             * dt
-            * self.speed;
+            * speed;
         cam.position += (if self.right { 1.0 } else { 0.0 } - if self.left { 1.0 } else { 0.0 })
             * right
             * dt
-            * self.speed;
+            * speed;
         cam.position += (if self.up { 1.0 } else { 0.0 } - if self.down { 1.0 } else { 0.0 })
             * up
             * dt
-            * self.speed;
+            * speed;
 
         assert!(self.min_fovy.0 > 0.0);
         assert!(self.max_fovy.0 < std::f32::consts::PI);

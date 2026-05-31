@@ -24,11 +24,11 @@ impl Lattice {
 
         let mut v = 0;
         let mut i = 0;
-        let mut x = 0;
-        while x < XZ {
+        let mut xz = 0;
+        while xz < XZ {
             s.vertices[v + 0] = Vertex {
                 pos: [
-                    x as f32 - (XZ / 2) as f32,
+                    xz as f32 - (XZ / 2) as f32,
                     -(Y as f32 / 2.0),
                     -(XZ as f32 / 2.0),
                 ],
@@ -36,7 +36,7 @@ impl Lattice {
             };
             s.vertices[v + 1] = Vertex {
                 pos: [
-                    x as f32 - (XZ / 2) as f32,
+                    xz as f32 - (XZ / 2) as f32,
                     -(Y as f32 / 2.0),
                     (XZ as f32 / 2.0),
                 ],
@@ -44,7 +44,7 @@ impl Lattice {
             };
             s.vertices[v + 2] = Vertex {
                 pos: [
-                    x as f32 - (XZ / 2) as f32,
+                    xz as f32 - (XZ / 2) as f32,
                     (Y as f32 / 2.0),
                     -(XZ as f32 / 2.0),
                 ],
@@ -52,7 +52,7 @@ impl Lattice {
             };
             s.vertices[v + 3] = Vertex {
                 pos: [
-                    x as f32 - (XZ / 2) as f32,
+                    xz as f32 - (XZ / 2) as f32,
                     (Y as f32 / 2.0),
                     (XZ as f32 / 2.0),
                 ],
@@ -65,18 +65,14 @@ impl Lattice {
             s.indices[i + 4] = v as u16 + 3;
             s.indices[i + 5] = v as u16 + 2;
 
-            x += 1;
             v += 4;
             i += 6;
-        }
 
-        let mut z = 0;
-        while z < XZ {
             s.vertices[v + 0] = Vertex {
                 pos: [
                     -(XZ as f32 / 2.0),
                     -(Y as f32 / 2.0),
-                    z as f32 - (XZ / 2) as f32,
+                    xz as f32 - (XZ / 2) as f32,
                 ],
                 axis: vertex::AXIS_Z,
             };
@@ -84,7 +80,7 @@ impl Lattice {
                 pos: [
                     -(XZ as f32 / 2.0),
                     (Y as f32 / 2.0),
-                    z as f32 - (XZ / 2) as f32,
+                    xz as f32 - (XZ / 2) as f32,
                 ],
                 axis: vertex::AXIS_Z,
             };
@@ -92,7 +88,7 @@ impl Lattice {
                 pos: [
                     (XZ as f32 / 2.0),
                     -(Y as f32 / 2.0),
-                    z as f32 - (XZ / 2) as f32,
+                    xz as f32 - (XZ / 2) as f32,
                 ],
                 axis: vertex::AXIS_Z,
             };
@@ -100,7 +96,7 @@ impl Lattice {
                 pos: [
                     (XZ as f32 / 2.0),
                     (Y as f32 / 2.0),
-                    z as f32 - (XZ / 2) as f32,
+                    xz as f32 - (XZ / 2) as f32,
                 ],
                 axis: vertex::AXIS_Z,
             };
@@ -111,7 +107,7 @@ impl Lattice {
             s.indices[i + 4] = v as u16 + 3;
             s.indices[i + 5] = v as u16 + 2;
 
-            z += 1;
+            xz += 1;
             v += 4;
             i += 6;
         }

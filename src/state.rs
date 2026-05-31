@@ -35,7 +35,9 @@ pub struct State<'a> {
     chunk_buf: wgpu::Buffer,
     background_buf: wgpu::Buffer,
 
+    frame_count: u32,
     last_render: time::Instant,
+    last_print: time::Instant,
     start_instant: time::Instant,
 }
 
@@ -76,8 +78,7 @@ impl<'a> State<'a> {
             mapped_at_creation: false,
         });
 
-        let mut chunk = chunk::Chunk::empty();
-        chunk.blocks[0][0] = 1;
+        let chunk = chunk::Chunk::random();
         let chunk_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("chunk buffer"),
             usage: wgpu::BufferUsages::UNIFORM,
@@ -269,7 +270,7 @@ impl<'a> State<'a> {
 
         Self {
             camera: Camera::new(Self::INIT_WIDTH as f32 / Self::INIT_HEIGHT as f32),
-            camera_controller: CameraController::new(6.0, 0.002),
+            camera_controller: CameraController::new(12.0, 0.002),
 
             instance,
             surface,
@@ -292,7 +293,9 @@ impl<'a> State<'a> {
             chunk_buf,
             background_buf,
 
+            frame_count: 0,
             last_render: time::Instant::now(),
+            last_print: time::Instant::now(),
             start_instant: time::Instant::now(),
         }
     }
@@ -303,7 +306,6 @@ impl<'a> State<'a> {
 
     pub fn device_input(&mut self, event: winit::event::DeviceEvent) {
         use winit::event::DeviceEvent;
-        dbg!(&event);
         match event {
             DeviceEvent::MouseMotion { delta: (dx, dy) } => {
                 self.camera_controller.process_mouse(dx as f32, dy as f32)
@@ -386,18 +388,27 @@ impl<'a> State<'a> {
             }),
         );
 
+        let elapsed = now - self.last_print;
+        if elapsed > std::time::Duration::from_secs(1) {
+            println!("AVG frame time: {:?}", elapsed / self.frame_count);
+
+            self.frame_count = 0;
+            self.last_print = now;
+        }
+
         let elapsed = now - self.last_render;
-        println!("time since last frame: {:?}", elapsed);
+        self.last_render = now;
         self.camera_controller
             .update_camera(&mut self.camera, elapsed);
-        self.last_render = now;
 
         let mat: [[f32; 4]; 4] = self.camera.proj_view_matrix().into();
         let dir = self.camera.direction();
+        let pos = self.camera.position();
         let globals = GlobalsUniform {
             proj_view_mat: mat,
             cam_dir: [dir.x, dir.y, dir.z],
-            _padding: 0,
+            cam_pos: [pos.x, pos.y, pos.z],
+            _padding: [0; 2],
         };
         self.queue
             .write_buffer(&self.globals_buf, 0, bytemuck::cast_slice(&[globals]));
@@ -467,6 +478,7 @@ impl<'a> State<'a> {
         }
 
         self.queue.submit([encoder.finish()]);
+        self.frame_count += 1;
         out.present();
         Ok(())
     }
