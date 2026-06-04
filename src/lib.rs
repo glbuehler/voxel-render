@@ -3,6 +3,7 @@
 mod background;
 mod camera;
 mod chunk;
+mod chunk_storage;
 mod globals;
 mod lattice;
 mod state;
@@ -90,15 +91,11 @@ impl ApplicationHandler for AppHandler<'_> {
             WindowEvent::RedrawRequested => {
                 state.update();
                 match state.render() {
-                    Ok(_) => {}
+                    None => {}
                     // Reconfigure the surface if lost
-                    Err(wgpu::SurfaceError::Lost) => state.resize(winit::dpi::PhysicalSize {
-                        width: state.width(),
-                        height: state.height(),
-                    }),
-                    Err(wgpu::SurfaceError::OutOfMemory) => event_loop.exit(),
+                    Some(wgpu::CurrentSurfaceTexture::Lost) => state.recreate_surface(),
                     // All other errors (Outdated, Timeout) should be resolved by the next frame
-                    Err(e) => eprintln!("{:?}", e),
+                    o => eprintln!("Skipping Frame {:?}", o),
                 }
             }
             _ => state.window_input(event),

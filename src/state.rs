@@ -6,6 +6,7 @@ use crate::{
     background,
     camera::{Camera, CameraController},
     chunk,
+    chunk_storage,
     globals::{self, GlobalsUniform},
     lattice,
     vertex::Vertex,
@@ -32,8 +33,10 @@ pub struct State<'a> {
     depth_texture: wgpu::Texture,
     background_vertices: wgpu::Buffer,
     globals_buf: wgpu::Buffer,
-    chunk_buf: wgpu::Buffer,
+    chunk_texture: wgpu::Texture,
     background_buf: wgpu::Buffer,
+
+    chunks: chunk_storage::ChunkStorage,
 
     frame_count: u32,
     last_render: time::Instant,
@@ -60,16 +63,9 @@ impl<'a> State<'a> {
             .await
             .unwrap();
 
-        let (device, queue) = adapter
-            .request_device(&Default::default(), None)
-            .await
-            .unwrap();
+        let (device, queue) = adapter.request_device(&Default::default()).await.unwrap();
 
-        let mut surface_config = surface
-            .get_default_config(&adapter, Self::INIT_WIDTH, Self::INIT_HEIGHT)
-            .unwrap();
-        surface_config.present_mode = wgpu::PresentMode::Fifo;
-        surface.configure(&device, &surface_config);
+        let surface_config = Self::configure_surface(&surface, &adapter, &device);
 
         let globals_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("view matrix buffer"),
@@ -78,11 +74,21 @@ impl<'a> State<'a> {
             mapped_at_creation: false,
         });
 
-        let chunk = chunk::Chunk::random();
-        let chunk_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("chunk buffer"),
-            usage: wgpu::BufferUsages::UNIFORM,
-            contents: bytemuck::cast_slice(&[chunk]),
+        let chunks = chunk_storage::ChunkStorage::new();
+
+        let chunk_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("chunk texture"),
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            size: wgpu::Extent3d {
+                width: lattice::XZ,
+                height: lattice::XZ / 16,
+                depth_or_array_layers: lattice::Y / u32::BITS,
+            },
+            mip_level_count: 1,
+            dimension: wgpu::TextureDimension::D3,
+            format: wgpu::TextureFormat::Rgba32Uint,
+            sample_count: 1,
+            view_formats: &[],
         });
 
         let uniform_bind_group_layout =
@@ -100,10 +106,10 @@ impl<'a> State<'a> {
                         visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     },
                     wgpu::BindGroupLayoutEntry {
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            sample_type: wgpu::TextureSampleType::Uint,
+                            view_dimension: wgpu::TextureViewDimension::D3,
                         },
                         count: None,
                         binding: 1,
@@ -122,7 +128,9 @@ impl<'a> State<'a> {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: chunk_buf.as_entire_binding(),
+                    resource: wgpu::BindingResource::TextureView(
+                        &chunk_texture.create_view(&wgpu::TextureViewDescriptor::default()),
+                    ),
                 },
             ],
         });
@@ -135,19 +143,18 @@ impl<'a> State<'a> {
             label: Some("Render Pipeline"),
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
-                depth_compare: wgpu::CompareFunction::Less,
-                depth_write_enabled: true,
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                depth_write_enabled: Some(true),
                 bias: Default::default(),
                 stencil: Default::default(),
             }),
             layout: Some(
                 &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("pipeline layout descriptor"),
-                    bind_group_layouts: &[&uniform_bind_group_layout],
+                    bind_group_layouts: &[Some(&uniform_bind_group_layout)],
                     ..Default::default()
                 }),
             ),
-            multiview: None,
             multisample: Default::default(),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -165,7 +172,7 @@ impl<'a> State<'a> {
                     array_stride: Vertex::stride(),
                 }],
                 compilation_options: Default::default(),
-                entry_point: "vx_main",
+                entry_point: Some("vx_main"),
                 module: &shader_module,
             },
             fragment: Some(wgpu::FragmentState {
@@ -175,9 +182,11 @@ impl<'a> State<'a> {
                     write_mask: Default::default(),
                 })],
                 compilation_options: Default::default(),
-                entry_point: "fg_main",
+                entry_point: Some("fg_main"),
                 module: &shader_module,
             }),
+            multiview_mask: None,
+            cache: None,
         });
 
         let (background_buf, background_bind_group_layout, background_bind_group) =
@@ -189,11 +198,10 @@ impl<'a> State<'a> {
             layout: Some(
                 &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("pipeline layout descriptor"),
-                    bind_group_layouts: &[&background_bind_group_layout],
+                    bind_group_layouts: &[Some(&background_bind_group_layout)],
                     ..Default::default()
                 }),
             ),
-            multiview: None,
             multisample: Default::default(),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -211,7 +219,7 @@ impl<'a> State<'a> {
                     array_stride: std::mem::size_of::<[f32; 3]>() as u64,
                 }],
                 compilation_options: Default::default(),
-                entry_point: "vx_main",
+                entry_point: Some("vx_main"),
                 module: &background_shader_module,
             },
             fragment: Some(wgpu::FragmentState {
@@ -221,9 +229,11 @@ impl<'a> State<'a> {
                     write_mask: Default::default(),
                 })],
                 compilation_options: Default::default(),
-                entry_point: "fg_main",
+                entry_point: Some("fg_main"),
                 module: &background_shader_module,
             }),
+            multiview_mask: None,
+            cache: None,
         });
 
         let lattice = lattice::Lattice::new();
@@ -290,14 +300,35 @@ impl<'a> State<'a> {
             depth_texture,
             background_vertices,
             globals_buf,
-            chunk_buf,
+            chunk_texture,
             background_buf,
+
+            chunks,
 
             frame_count: 0,
             last_render: time::Instant::now(),
             last_print: time::Instant::now(),
             start_instant: time::Instant::now(),
         }
+    }
+
+    pub fn recreate_surface(&mut self) {
+        self.instance.create_surface(self.window.clone()).unwrap();
+        Self::configure_surface(&mut self.surface, &self.adapter, &self.device);
+    }
+
+    pub fn configure_surface(
+        surface: &wgpu::Surface,
+        adapter: &wgpu::Adapter,
+        device: &wgpu::Device,
+    ) -> wgpu::SurfaceConfiguration {
+        let mut surface_config = surface
+            .get_default_config(adapter, Self::INIT_WIDTH, Self::INIT_HEIGHT)
+            .unwrap();
+        surface_config.present_mode = wgpu::PresentMode::Fifo;
+
+        surface.configure(device, &surface_config);
+        surface_config
     }
 
     pub fn window(&self) -> &winit::window::Window {
@@ -318,11 +349,12 @@ impl<'a> State<'a> {
         use winit::event::WindowEvent;
         match event {
             WindowEvent::KeyboardInput {
-                event: winit::event::KeyEvent {
-                    physical_key: winit::keyboard::PhysicalKey::Code(code),
-                    state,
-                    ..
-                },
+                event:
+                    winit::event::KeyEvent {
+                        physical_key: winit::keyboard::PhysicalKey::Code(code),
+                        state,
+                        ..
+                    },
                 ..
             } => {
                 self.camera_controller
@@ -373,7 +405,7 @@ impl<'a> State<'a> {
         self.surface_config.height
     }
 
-    pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+    pub fn render(&mut self) -> Option<wgpu::CurrentSurfaceTexture> {
         let now = time::Instant::now();
 
         self.queue.write_buffer(
@@ -412,8 +444,21 @@ impl<'a> State<'a> {
         };
         self.queue
             .write_buffer(&self.globals_buf, 0, bytemuck::cast_slice(&[globals]));
+        self.queue.write_texture(
+            self.chunk_texture.as_image_copy(),
+            bytemuck::cast_slice(&self.chunks.copy_to_render_buffer(0, 0, 0)),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(lattice::XZ * 16),
+                rows_per_image: Some(lattice::XZ / 16),
+            },
+            self.chunk_texture.size(),
+        );
 
-        let out = self.surface.get_current_texture()?;
+        let out = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(out) => out,
+            cst => return Some(cst),
+        };
         let view = out.texture.create_view(&Default::default());
         let depth_view = self.depth_texture.create_view(&Default::default());
 
@@ -437,10 +482,12 @@ impl<'a> State<'a> {
                     },
                     resolve_target: None,
                     view: &view,
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: None,
                 occlusion_query_set: None,
                 timestamp_writes: None,
+                multiview_mask: None,
             });
             render_pass.set_pipeline(&self.background_pipeline);
             render_pass.set_bind_group(0, &self.background_bind_group, &[]);
@@ -457,6 +504,7 @@ impl<'a> State<'a> {
                     },
                     resolve_target: None,
                     view: &view,
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &depth_view,
@@ -468,6 +516,7 @@ impl<'a> State<'a> {
                 }),
                 occlusion_query_set: None,
                 timestamp_writes: None,
+                multiview_mask: None,
             });
             render_pass.set_pipeline(&self.pipeline);
             render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
@@ -480,6 +529,6 @@ impl<'a> State<'a> {
         self.queue.submit([encoder.finish()]);
         self.frame_count += 1;
         out.present();
-        Ok(())
+        None
     }
 }

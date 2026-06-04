@@ -4,12 +4,27 @@ const Y: u32 = 64;
 const NUM_XZ_VERTICES: u32 = XZ * 4;
 const NUM_Y_VERTICES: u32 = Y * 4;
 
+const AXIS_X: u32 = 0;
+const AXIS_Y: u32 = 1;
+const AXIS_Z: u32 = 2;
+
+const FACE_FRONT: bool = false;
+const FACE_BACK: bool = true;
+
 const CHUNK_SIZE: u32 = 32;
-const CHUNK_ARRAY_SIZE: u32 = CHUNK_SIZE * CHUNK_SIZE / 4;
+const CHUNK_STRIDE: u32 = XZ / CHUNK_SIZE;
+const CHUNK_COUNT: u32 = CHUNK_STRIDE * CHUNK_STRIDE;
+const CHUNK_ARRAY_SIZE: u32 = CHUNK_COUNT * CHUNK_SIZE * CHUNK_SIZE / 4;
 
 const epsilon: f32 = 0.001;
 
-const light: vec3<f32> = vec3<f32>(0.2, -1.0, 0.3);
+const light_unnormalized: vec3<f32> = vec3<f32>(0.2, -1.0, 0.3);
+const light_norm: f32 = sqrt(
+    light_unnormalized.x * light_unnormalized.x
+    + light_unnormalized.y * light_unnormalized.y
+    + light_unnormalized.z * light_unnormalized.z
+);
+const light: vec3<f32> = light_unnormalized / light_norm;
 
 struct GlobalsUniform {
     proj_view_mat: mat4x4<f32>,
@@ -21,14 +36,7 @@ struct GlobalsUniform {
 var<uniform> globals: GlobalsUniform;
 
 @group(0) @binding(1)
-var<uniform> chunk: array<vec4<u32>, CHUNK_ARRAY_SIZE>;
-
-const AXIS_X: u32 = 0;
-const AXIS_Y: u32 = 1;
-const AXIS_Z: u32 = 2;
-
-const FACE_FRONT: bool = false;
-const FACE_BACK: bool = true;
+var chunks: texture_3d<u32>;
 
 struct VertexInput {
     @location(0) pos: vec3<f32>,
@@ -59,15 +67,23 @@ fn get_block(coord: vec3<f32>, axis: u32, face: bool) -> bool {
         coord_i.z = i32(round(coord.z + offset));
     }
 
-    if coord_i.x < 0 || coord_i.x > i32(CHUNK_SIZE)
-        || coord_i.y < 0 || coord_i.y > i32(CHUNK_SIZE)
-        || coord_i.z < 0 || coord_i.z > i32(CHUNK_SIZE) {
+    let chunk_x = coord_i.x / i32(CHUNK_SIZE) + 1;
+    let chunk_z = coord_i.z / i32(CHUNK_SIZE) + 1;
+
+    if chunk_x < 0 || chunk_x > i32(CHUNK_STRIDE)
+        || coord_i.y < 0 || coord_i.y > i32(Y)
+        || chunk_z < 0 || chunk_z > i32(CHUNK_STRIDE)
+    {
         return false;
     }
 
-    let i = coord_i.x * 32 + coord_i.z;
-    let col = chunk[i / 4][i % 4];
-    let mask = 1u << u32(coord_i.y);
+    let tx = textureLoad(
+        chunks,
+        vec3<i32>(0),//vec3<i32>(coord_i.x, coord_i.z / 4i, coord_i.y / i32(CHUNK_SIZE)),
+        0
+    );
+    let col = tx[0/* coord_i.z % 4i */];
+    let mask = u32(1u << u32(0/*coord_i.x % i32(CHUNK_SIZE)*/));
     return (col & mask) != 0;
 }
 
@@ -85,6 +101,60 @@ struct FragmentInput {
     @location(1) axis: u32,
 }
 
+fn block_color(coord: vec3<f32>, axis: u32, face: bool) -> vec4<f32> {
+    let block = get_block(coord, axis, face);
+    if !block {
+        return vec4<f32>(0.0);;
+    }
+
+    var normal: vec3<f32>;
+    if axis == AXIS_X {
+        normal = vec3<f32>(1.0, 0.0, 0.0);
+    } else if axis == AXIS_Y {
+        normal = vec3<f32>(0.0, 1.0, 0.0);
+    } else {
+        normal = vec3<f32>(0.0, 0.0, 1.0);
+    }
+    if face == FACE_BACK {
+        normal *= -1.0;
+    }
+
+    let exposed = !get_block(coord - normal, axis, face);
+    if !exposed {
+        return vec4<f32>(0.0);;
+    }
+
+    let green = vec3<f32>(0.0, 1.0, 0.0);
+    let dot = dot(light, normal) + 0.2;
+    let color = select(vec3<f32>(dot), green, abs(coord.x - 32.0) == epsilon);
+    return vec4<f32>(color, 1.0);
+}
+
+fn chunk_grid(coord: vec3<f32>, axis: u32, face: bool) -> bool {
+    if (
+            axis == AXIS_X
+            && abs(coord.x % f32(CHUNK_SIZE)) < epsilon
+            && (
+                abs(coord.z % 4) < epsilon * 32
+                || abs(coord.y % 4) < epsilon * 32
+            )
+        ) || (
+            axis == AXIS_Z
+            && abs(coord.z % f32(CHUNK_SIZE)) < epsilon
+            && (
+                abs(coord.x % 4) < epsilon * 32
+                || abs(coord.y % 4) < epsilon * 32
+            )
+
+        )
+        
+    {
+        return true;
+    }
+    return false;
+    
+}
+
 @fragment
 fn fg_main(in: FragmentInput) -> @location(0) vec4<f32> {
 
@@ -94,23 +164,14 @@ fn fg_main(in: FragmentInput) -> @location(0) vec4<f32> {
         || (in.axis == AXIS_Z && in.world_pos.z < globals.cam_pos.z)
     );
 
-    let block = get_block(in.world_pos, in.axis, face);
-    if !block {
-        discard;
+    let block_color = block_color(in.world_pos, in.axis, face);
+
+    if chunk_grid(in.world_pos, in.axis, face) {
+        return vec4<f32>(1.0, 1.0, 0.0, 1.0);
     }
 
-    var normal: vec3<f32>;
-    if in.axis == AXIS_X {
-        normal = vec3<f32>(1.0, 0.0, 0.0);
-    } else if in.axis == AXIS_Y {
-        normal = vec3<f32>(0.0, 1.0, 0.0);
-    } else {
-        normal = vec3<f32>(0.0, 0.0, 1.0);
+    if block_color.w > 0.0 {
+        return block_color;
     }
-    if face == FACE_BACK {
-        normal *= -1.0;
-    }
-
-    let dot = dot(normalize(light), normal) / 2.0 + 0.5;
-    return vec4<f32>(vec3<f32>(dot), 1.0);
+    discard;
 }
