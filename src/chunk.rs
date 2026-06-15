@@ -16,30 +16,30 @@ impl Chunk {
         }
     }
 
-    pub fn noise(chunk_x: i32, chunk_z: i32) -> Self {
+    pub fn noise(chunk_x: i32, chunk_y: i32, chunk_z: i32) -> Self {
         const FREQUENCY: f64 = 0.04;
         let noise = OpenSimplex::new(2);
         let mut result = Self::empty();
 
-        for i in 0..CHUNK_SIZE * CHUNK_SIZE {
-            let x = i / CHUNK_SIZE;
-            let z = i % CHUNK_SIZE;
+        for i in 0..CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE {
+            let x = i / CHUNK_SIZE / CHUNK_SIZE;
+            let y = i % CHUNK_SIZE;
+            let z = i / CHUNK_SIZE % CHUNK_SIZE;
 
             let world_x = CHUNK_SIZE as i32 * chunk_x + x as i32;
+            let world_y = CHUNK_SIZE as i32 * chunk_y + y as i32;
             let world_z = CHUNK_SIZE as i32 * chunk_z + z as i32;
 
-            let value = noise.get([world_x as f64 * FREQUENCY, world_z as f64 * FREQUENCY]);
-            let height = ((value + 1.0) / 2.0 * CHUNK_SIZE as f64) as u32;
-            let height = if height == CHUNK_SIZE as u32{
-                height - 1
-            } else {
-                height
-            };
-            result.blocks[x][z] = (1 << height) - 1;
+            let value = noise.get([
+                world_x as f64 * FREQUENCY,
+                world_y as f64 * FREQUENCY,
+                world_z as f64 * FREQUENCY,
+            ]);
+            let block = (value >= FREQUENCY) as u32;
+            result.blocks[x][z] |= block << y;
         }
         return result;
     }
-
 }
 
 impl Default for Chunk {

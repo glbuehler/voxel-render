@@ -1,6 +1,6 @@
 use crate::vertex::{self, Vertex};
 
-pub const XZ: u32 = 64;
+pub const XZ: u32 = 128;
 pub const Y: u32 = 64;
 pub const NUM_VERTICES: usize = (8 * XZ + 4 * Y) as usize;
 pub const NUM_INDICES: usize = (12 * XZ + 6 * Y) as usize;

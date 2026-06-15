@@ -28,6 +28,7 @@ pub struct State<'a> {
 
     camera: Camera,
     camera_controller: CameraController,
+    grid_lines: bool,
     vertex_buf: wgpu::Buffer,
     index_buf: wgpu::Buffer,
     depth_texture: wgpu::Texture,
@@ -81,12 +82,12 @@ impl<'a> State<'a> {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             size: wgpu::Extent3d {
                 width: lattice::XZ,
-                height: lattice::XZ / 16,
-                depth_or_array_layers: lattice::Y / u32::BITS,
+                height: lattice::XZ,
+                depth_or_array_layers: lattice::Y,
             },
             mip_level_count: 1,
             dimension: wgpu::TextureDimension::D3,
-            format: wgpu::TextureFormat::Rgba32Uint,
+            format: wgpu::TextureFormat::R32Uint,
             sample_count: 1,
             view_formats: &[],
         });
@@ -281,6 +282,7 @@ impl<'a> State<'a> {
         Self {
             camera: Camera::new(Self::INIT_WIDTH as f32 / Self::INIT_HEIGHT as f32),
             camera_controller: CameraController::new(12.0, 0.002),
+            grid_lines: true,
 
             instance,
             surface,
@@ -357,8 +359,12 @@ impl<'a> State<'a> {
                     },
                 ..
             } => {
+                let pressed = state == winit::event::ElementState::Pressed;
                 self.camera_controller
-                    .process_keyboard(code, state == winit::event::ElementState::Pressed);
+                    .process_keyboard(code, pressed);
+                if code == winit::keyboard::KeyCode::F3 && pressed {
+                    self.grid_lines = !self.grid_lines;
+                }
             }
             WindowEvent::MouseWheel {
                 delta: winit::event::MouseScrollDelta::LineDelta(_, d),
@@ -440,7 +446,8 @@ impl<'a> State<'a> {
             proj_view_mat: mat,
             cam_dir: [dir.x, dir.y, dir.z],
             cam_pos: [pos.x, pos.y, pos.z],
-            _padding: [0; 2],
+            grid_lines: self.grid_lines as u32,
+            _padding: [0; 1],
         };
         self.queue
             .write_buffer(&self.globals_buf, 0, bytemuck::cast_slice(&[globals]));
@@ -449,8 +456,8 @@ impl<'a> State<'a> {
             bytemuck::cast_slice(&self.chunks.copy_to_render_buffer(0, 0, 0)),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(lattice::XZ * 16),
-                rows_per_image: Some(lattice::XZ / 16),
+                bytes_per_row: Some(lattice::XZ * 4),
+                rows_per_image: Some(lattice::XZ),
             },
             self.chunk_texture.size(),
         );
