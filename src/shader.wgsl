@@ -18,18 +18,12 @@ const CHUNK_ARRAY_SIZE: u32 = CHUNK_COUNT * CHUNK_SIZE * CHUNK_SIZE / 4;
 
 const epsilon: f32 = 0.001;
 
-const light_unnormalized: vec3<f32> = vec3<f32>(0.2, -1.0, 0.3);
-const light_norm: f32 = sqrt(
-    light_unnormalized.x * light_unnormalized.x
-    + light_unnormalized.y * light_unnormalized.y
-    + light_unnormalized.z * light_unnormalized.z
-);
-const light: vec3<f32> = light_unnormalized / light_norm;
-
 struct GlobalsUniform {
     proj_view_mat: mat4x4<f32>,
+    light_mat: mat4x4<f32>,
     cam_pos: vec3<f32>,
     cam_dir: vec3<f32>,
+    light_dir: vec3<f32>,
     grid_lines: u32,
 }
 
@@ -39,6 +33,9 @@ var<uniform> globals: GlobalsUniform;
 @group(0) @binding(1)
 var blocks: texture_3d<u32>;
 
+@group(1) @binding(0)
+var shadow_map: texture_2d<f32>;
+
 struct VertexInput {
     @location(0) pos: vec3<f32>,
     @location(1) axis: u32,
@@ -47,7 +44,28 @@ struct VertexInput {
 struct VertexOutput {
     @builtin(position) pos: vec4<f32>,
     @location(0) world_pos: vec3<f32>,
-    @location(1) axis: u32,
+    @location(1) light_pos: vec3<f32>,
+    @location(2) axis: u32,
+}
+
+@vertex
+fn vx_main(in: VertexInput) -> VertexOutput {
+    var out: VertexOutput;
+    out.pos = globals.proj_view_mat * vec4<f32>(in.pos, 1.0);
+    out.world_pos = in.pos;
+    out.light_pos = (globals.light_mat * vec4<f32>(in.pos, 1.0)).xyz;
+    out.axis = in.axis;
+    return out;
+}
+
+@vertex
+fn vx_shadow(in: VertexInput) -> VertexOutput {
+    var out: VertexOutput;
+    out.pos = globals.light_mat * vec4<f32>(in.pos, 1.0);
+    out.world_pos = in.pos;
+    out.light_pos = (globals.light_mat * vec4<f32>(in.pos, 1.0)).xyz;
+    out.axis = in.axis;
+    return out;
 }
 
 fn get_block(coord: vec3<f32>, axis: u32, face: bool) -> bool {
@@ -77,24 +95,20 @@ fn get_block(coord: vec3<f32>, axis: u32, face: bool) -> bool {
 
     let tx = textureLoad(
         blocks,
-        vec3<i32>(coord_i.x + i32(XZ / 2), coord_i.z + i32(XZ / 2), coord_i.y + i32(Y / 2)),
-        0
+        vec3<i32>(
+            coord_i.x + i32(XZ / 2),
+            coord_i.z + i32(XZ / 2),
+            coord_i.y + i32(Y / 2),
+        ),
+        0,
     );
     return bool(tx[0]);
 }
 
-@vertex
-fn vx_main(in: VertexInput) -> VertexOutput {
-    var out: VertexOutput;
-    out.pos = globals.proj_view_mat * vec4<f32>(in.pos, 1.0);
-    out.world_pos = in.pos;
-    out.axis = in.axis;
-    return out;
-}
-
 struct FragmentInput {
     @location(0) world_pos: vec3<f32>,
-    @location(1) axis: u32,
+    @location(1) light_pos: vec3<f32>,
+    @location(2) axis: u32,
 }
 
 fn block_color(coord: vec3<f32>, axis: u32, face: bool) -> vec4<f32> {
@@ -120,27 +134,39 @@ fn block_color(coord: vec3<f32>, axis: u32, face: bool) -> vec4<f32> {
         return vec4<f32>(0.0);;
     }
 
-    let dot = dot(light, normal) + 0.3;
+    let dot = dot(globals.light_dir, normal) + 0.3;
     return vec4<f32>(vec3<f32>(dot), 1.0);
 }
 
-fn chunk_grid(coord: vec3<f32>, axis: u32, face: bool) -> bool {
-    return (
-        axis == AXIS_X
-        && abs(coord.x % f32(CHUNK_SIZE)) < epsilon
-        && (
-            abs(coord.z % 4) < epsilon * 32
-            || abs(coord.y % 4) < epsilon * 32
-        )
-    ) || (
-        axis == AXIS_Z
-        && abs(coord.z % f32(CHUNK_SIZE)) < epsilon
-        && (
-            abs(coord.x % 4) < epsilon * 32
-            || abs(coord.y % 4) < epsilon * 32
-        )
+fn grid_dist(v: f32, size: f32) -> f32 {
+    let dist = fract(v / size);
+    return min(dist, 1.0 - dist) * size;
+}
 
-    );
+fn chunk_grid(coord: vec3<f32>, axis: u32, face: bool) -> bool {
+    let thickness = 2.0;
+    let grid_size = 32.0;
+
+    let dx4 = grid_dist(coord.x, 4.0);
+    let dy4 = grid_dist(coord.y, 4.0);
+    let dz4 = grid_dist(coord.z, 4.0);
+    let dx32 = grid_dist(coord.x, 32.0);
+    let dz32 = grid_dist(coord.z, 32.0);
+    let dist_l1 = length(vec2<f32>(dx4, dz32));
+    let dist_l2 = length(vec2<f32>(dx32, dz4));
+    let dist_l3 = length(vec2<f32>(dy4, dx32));
+    let dist_l4 = length(vec2<f32>(dy4, dz32));
+
+    let w = fwidth(coord.y);
+
+    let l1 = step(dist_l1, w * thickness);
+    let l2 = step(dist_l2, w * thickness);
+    let l3 = step(dist_l3, w * thickness);
+    let l4 = step(dist_l4, w * thickness);
+
+    let line = max(l1, max(l2, max(l3, l4)));
+
+    return line == 1.0;
 }
 
 @fragment
@@ -152,14 +178,44 @@ fn fg_main(in: FragmentInput) -> @location(0) vec4<f32> {
         || (in.axis == AXIS_Z && in.world_pos.z < globals.cam_pos.z)
     );
 
-    let block_color = block_color(in.world_pos, in.axis, face);
-
     if globals.grid_lines != 0 && chunk_grid(in.world_pos, in.axis, face) {
         return vec4<f32>(1.0, 1.0, 0.0, 1.0);
     }
 
-    if block_color.w > 0.0 {
-        return block_color;
+    var block_color = block_color(in.world_pos, in.axis, face);
+
+    if block_color.w == 0.0 {
+        discard;
     }
-    discard;
+
+    let uv = in.light_pos.xy * 0.5 + 0.5;
+    let depth = in.light_pos.z * 0.5;
+
+    let shadow_depth = textureLoad(
+        shadow_map,
+        vec2<u32>(u32(uv.x * 1024.0), u32(uv.y * 1024)),
+        0,
+    );
+
+    if depth < shadow_depth[0] {
+        block_color.x *= 0.2;
+        block_color.y *= 0.2;
+        block_color.z *= 0.2;
+    }
+
+    return block_color;
 }
+
+@fragment
+fn fg_shadow(in: FragmentInput) {
+    let face = select(FACE_FRONT, FACE_BACK,
+        (in.axis == AXIS_X && in.world_pos.x < globals.cam_pos.x)
+        || (in.axis == AXIS_Y && in.world_pos.y < globals.cam_pos.y)
+        || (in.axis == AXIS_Z && in.world_pos.z < globals.cam_pos.z)
+    );
+
+    if !get_block(in.world_pos, in.axis, face) {
+        discard;
+    }
+}
+

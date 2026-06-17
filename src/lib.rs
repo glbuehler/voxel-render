@@ -8,6 +8,7 @@ mod globals;
 mod lattice;
 mod state;
 mod vertex;
+mod shadow;
 
 use winit::{
     application::ApplicationHandler,
