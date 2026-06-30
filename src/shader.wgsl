@@ -53,7 +53,8 @@ fn vx_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     out.pos = globals.proj_view_mat * vec4<f32>(in.pos, 1.0);
     out.world_pos = in.pos;
-    out.light_pos = (globals.light_mat * vec4<f32>(in.pos, 1.0)).xyz;
+    let light_pos = globals.light_mat * vec4<f32>(in.pos, 1.0);
+    out.light_pos = light_pos.xyz / light_pos.w;
     out.axis = in.axis;
     return out;
 }
@@ -61,9 +62,8 @@ fn vx_main(in: VertexInput) -> VertexOutput {
 @vertex
 fn vx_shadow(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    out.pos = globals.light_mat * vec4<f32>(in.pos, 1.0);
-    out.world_pos = in.pos;
-    out.light_pos = (globals.light_mat * vec4<f32>(in.pos, 1.0)).xyz;
+    let light_pos = globals.light_mat * vec4<f32>(in.pos, 1.0);
+    out.pos = light_pos / light_pos.w;
     out.axis = in.axis;
     return out;
 }
@@ -189,15 +189,18 @@ fn fg_main(in: FragmentInput) -> @location(0) vec4<f32> {
     }
 
     let uv = in.light_pos.xy * 0.5 + 0.5;
-    let depth = in.light_pos.z * 0.5;
+    let dim = textureDimensions(shadow_map);
+    let depth = in.light_pos.z;
+
 
     let shadow_depth = textureLoad(
         shadow_map,
-        vec2<u32>(u32(uv.x * 1024.0), u32(uv.y * 1024)),
+        vec2<u32>(u32(uv.x * f32(dim.x - 1)), u32(uv.y * f32(dim.y - 1))),
         0,
-    );
+    )[0];
+    return vec4<f32>(shadow_depth, shadow_depth, shadow_depth, 1.0);
 
-    if depth < shadow_depth[0] {
+    if depth < shadow_depth {
         block_color.x *= 0.2;
         block_color.y *= 0.2;
         block_color.z *= 0.2;
@@ -209,9 +212,9 @@ fn fg_main(in: FragmentInput) -> @location(0) vec4<f32> {
 @fragment
 fn fg_shadow(in: FragmentInput) {
     let face = select(FACE_FRONT, FACE_BACK,
-        (in.axis == AXIS_X && in.world_pos.x < globals.cam_pos.x)
-        || (in.axis == AXIS_Y && in.world_pos.y < globals.cam_pos.y)
-        || (in.axis == AXIS_Z && in.world_pos.z < globals.cam_pos.z)
+        (in.axis == AXIS_X && globals.light_dir.x > 0.0)
+        || (in.axis == AXIS_Y && globals.light_dir.y > 0.0)
+        || (in.axis == AXIS_Z && globals.light_dir.z > 0.0)
     );
 
     if !get_block(in.world_pos, in.axis, face) {

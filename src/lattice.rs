@@ -1,9 +1,60 @@
 use crate::vertex::{self, Vertex};
+use cgmath;
 
 pub const XZ: u32 = 128;
 pub const Y: u32 = 64;
-pub const NUM_VERTICES: usize = (8 * XZ + 4 * Y) as usize;
-pub const NUM_INDICES: usize = (12 * XZ + 6 * Y) as usize;
+pub const NUM_VERTICES: usize = (8 * (XZ + 1) + 4 * (Y + 1)) as usize;
+pub const NUM_INDICES: usize = (12 * (XZ + 1) + 6 * (Y + 1)) as usize;
+
+pub const MAX_X: i32 = (XZ as i32) / 2 - 1;
+pub const MAX_Z: i32 = (XZ as i32) / 2 - 1;
+pub const MAX_Y: i32 = (Y as i32) / 2 - 1;
+pub const MIN_X: i32 = -(XZ as i32) / 2;
+pub const MIN_Z: i32 = -(XZ as i32) / 2;
+pub const MIN_Y: i32 = -(Y as i32) / 2;
+
+pub const CORNERS: &[cgmath::Vector3<f32>] = &[
+    cgmath::Vector3 {
+        x: MIN_X as f32,
+        y: MIN_Y as f32,
+        z: MIN_Z as f32,
+    },
+    cgmath::Vector3 {
+        x: MAX_X as f32,
+        y: MIN_Y as f32,
+        z: MIN_Z as f32,
+    },
+    cgmath::Vector3 {
+        x: MIN_X as f32,
+        y: MAX_Y as f32,
+        z: MIN_Z as f32,
+    },
+    cgmath::Vector3 {
+        x: MAX_X as f32,
+        y: MAX_Y as f32,
+        z: MIN_Z as f32,
+    },
+    cgmath::Vector3 {
+        x: MIN_X as f32,
+        y: MIN_Y as f32,
+        z: MAX_Z as f32,
+    },
+    cgmath::Vector3 {
+        x: MAX_X as f32,
+        y: MIN_Y as f32,
+        z: MAX_Z as f32,
+    },
+    cgmath::Vector3 {
+        x: MIN_X as f32,
+        y: MAX_Y as f32,
+        z: MAX_Z as f32,
+    },
+    cgmath::Vector3 {
+        x: MAX_X as f32,
+        y: MAX_Y as f32,
+        z: MAX_Z as f32,
+    },
+];
 
 #[repr(C)]
 #[derive(Debug, Clone)]
@@ -25,7 +76,7 @@ impl Lattice {
         let mut v = 0;
         let mut i = 0;
         let mut xz = 0;
-        while xz < XZ {
+        while xz <= XZ {
             s.vertices[v + 0] = Vertex {
                 pos: [
                     xz as f32 - (XZ / 2) as f32,
@@ -113,7 +164,7 @@ impl Lattice {
         }
 
         let mut y = 0;
-        while y < Y {
+        while y <= Y {
             s.vertices[v + 0] = Vertex {
                 pos: [
                     -(XZ as f32 / 2.0),

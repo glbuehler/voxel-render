@@ -45,6 +45,7 @@ pub struct State<'a> {
     chunks: chunk_storage::ChunkStorage,
 
     frame_count: u32,
+    start: time::Instant,
     last_render: time::Instant,
     last_print: time::Instant,
     start_instant: time::Instant,
@@ -410,12 +411,13 @@ impl<'a> State<'a> {
             chunk_texture,
             background_buf,
 
-            light_dir: cgmath::Vector3::new(0.2, -1.0, 0.3),
+            light_dir: cgmath::Vector3::new(0.0, -1.0, 1.0),
             shadow_map,
 
             chunks,
 
             frame_count: 0,
+            start: time::Instant::now(),
             last_render: time::Instant::now(),
             last_print: time::Instant::now(),
             start_instant: time::Instant::now(),
@@ -523,6 +525,9 @@ impl<'a> State<'a> {
         self.camera_controller
             .update_camera(&mut self.camera, elapsed);
 
+        self.light_dir.x = f32::sin((now - self.start).as_secs_f32());
+        self.light_dir.z = f32::cos((now - self.start).as_secs_f32());
+
         self.queue.write_buffer(
             &self.background_buf,
             0,
@@ -541,7 +546,7 @@ impl<'a> State<'a> {
         let light = self.light_dir.normalize();
         let globals = GlobalsUniform {
             proj_view_mat: cam_mat.into(),
-            light_mat: shadow::directional(light, cam_mat).into(),
+            light_mat: shadow::directional(light).into(),
             cam_dir: [dir.x, dir.y, dir.z],
             cam_pos: [pos.x, pos.y, pos.z],
             light_dir: [light.x, light.y, light.z],
