@@ -53,6 +53,7 @@ fn vx_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     out.pos = globals.proj_view_mat * vec4<f32>(in.pos, 1.0);
     out.world_pos = in.pos;
+
     let light_pos = globals.light_mat * vec4<f32>(in.pos, 1.0);
     out.light_pos = light_pos.xyz / light_pos.w;
     out.axis = in.axis;
@@ -64,6 +65,7 @@ fn vx_shadow(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     let light_pos = globals.light_mat * vec4<f32>(in.pos, 1.0);
     out.pos = light_pos / light_pos.w;
+    out.world_pos = in.pos;
     out.axis = in.axis;
     return out;
 }
@@ -114,7 +116,7 @@ struct FragmentInput {
 fn block_color(coord: vec3<f32>, axis: u32, face: bool) -> vec4<f32> {
     let block = get_block(coord, axis, face);
     if !block {
-        return vec4<f32>(0.0);;
+        return vec4<f32>(0.0);
     }
 
     var normal: vec3<f32>;
@@ -188,19 +190,25 @@ fn fg_main(in: FragmentInput) -> @location(0) vec4<f32> {
         discard;
     }
 
-    let uv = in.light_pos.xy * 0.5 + 0.5;
-    let dim = textureDimensions(shadow_map);
+    let uv = vec2<f32>(
+        in.light_pos.x * 0.5 + 0.5,
+        -in.light_pos.y * 0.5 + 0.5,
+    );
+    let dim = vec2<f32>(textureDimensions(shadow_map));
     let depth = in.light_pos.z;
 
+    let texel_coords = vec2<u32>(
+        clamp(uv * dim, vec2<f32>(0.0), vec2<f32>(dim - vec2<f32>(1.0)))
+    );
 
     let shadow_depth = textureLoad(
         shadow_map,
-        vec2<u32>(u32(uv.x * f32(dim.x - 1)), u32(uv.y * f32(dim.y - 1))),
+        texel_coords,
         0,
     )[0];
-    return vec4<f32>(shadow_depth, shadow_depth, shadow_depth, 1.0);
+    //return vec4<f32>(depth, depth, depth, 1.0);
 
-    if depth < shadow_depth {
+    if depth > shadow_depth + epsilon {
         block_color.x *= 0.2;
         block_color.y *= 0.2;
         block_color.z *= 0.2;
@@ -212,9 +220,9 @@ fn fg_main(in: FragmentInput) -> @location(0) vec4<f32> {
 @fragment
 fn fg_shadow(in: FragmentInput) {
     let face = select(FACE_FRONT, FACE_BACK,
-        (in.axis == AXIS_X && globals.light_dir.x > 0.0)
-        || (in.axis == AXIS_Y && globals.light_dir.y > 0.0)
-        || (in.axis == AXIS_Z && globals.light_dir.z > 0.0)
+        (in.axis == AXIS_X && globals.light_dir.x < 0.0)
+        || (in.axis == AXIS_Y && globals.light_dir.y < 0.0)
+        || (in.axis == AXIS_Z && globals.light_dir.z < 0.0)
     );
 
     if !get_block(in.world_pos, in.axis, face) {

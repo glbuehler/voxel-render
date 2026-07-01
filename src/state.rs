@@ -103,8 +103,8 @@ impl<'a> State<'a> {
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Depth32Float,
             size: wgpu::Extent3d {
-                width: 1024,
-                height: 1024,
+                width: 4096,
+                height: 4096,
                 depth_or_array_layers: 1,
             },
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
@@ -411,7 +411,7 @@ impl<'a> State<'a> {
             chunk_texture,
             background_buf,
 
-            light_dir: cgmath::Vector3::new(0.0, -1.0, 1.0),
+            light_dir: cgmath::Vector3::new(0.0, -1.0, 0.0),
             shadow_map,
 
             chunks,
@@ -526,7 +526,7 @@ impl<'a> State<'a> {
             .update_camera(&mut self.camera, elapsed);
 
         self.light_dir.x = f32::sin((now - self.start).as_secs_f32());
-        self.light_dir.z = f32::cos((now - self.start).as_secs_f32());
+        // self.light_dir.z = f32::cos((now - self.start).as_secs_f32());
 
         self.queue.write_buffer(
             &self.background_buf,
